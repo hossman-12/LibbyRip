@@ -181,7 +181,47 @@ try {
 
     # 5) Prompt for output file location & name (GUI)
     #    Default path should be where the script was launched from (your requirement)
-    $outputFile = Pick-SaveFile "Save M4B file" $launchDir "$bookName.m4b"
+    #$outputFile = Pick-SaveFile "Save M4B file" $launchDir "$bookName.m4b"
+    # -------------------------------
+    # Build output directory structure: Author\Title
+    # -------------------------------
+
+    # Clean invalid characters for Windows paths
+    function Clean-Name($name) {
+        return ($name -replace '[<>:"/\\|?*]', '').Trim()
+    }
+
+    $authorClean = Clean-Name($author)
+    $titleClean  = Clean-Name($bookName)
+
+    # Build full output directory
+    $outputDir = Join-Path $launchDir $authorClean
+    $outputDir = Join-Path $outputDir $titleClean
+
+    # Create directory structure if it doesn't exist
+    if (-not (Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
+
+    # Final output file path
+    $OutputFile = Join-Path $outputDir "$titleClean.m4b"
+
+    if (Test-Path $OutputFile) {
+        $choice = [System.Windows.Forms.MessageBox]::Show(
+            "File already exists:`n$OutputFile`n`nOverwrite?",
+            "Confirm Overwrite",
+            "YesNo",
+            "Warning"
+        )
+
+        if ($choice -ne "Yes") {
+            throw "User canceled overwrite."
+        }
+    }
+
+    Write-Host "`nOutput will be saved to:"
+    Write-Host $OutputFile
+
     if (-not $outputFile) { throw "No output file selected." }
 
     # 6) Convert to M4B (run ffmpeg from within bookDir so concat list relative names work)
@@ -211,8 +251,14 @@ try {
     if (-not (Test-Path $outputFile)) { throw "Output file was not created: $outputFile" }
 
     $fi = Get-Item $outputFile
+    #$probe = & ffprobe -hide_banner -show_chapters "$outputFile" 2>&1 | Out-String
+    #$probe = & ffprobe -hide_banner -loglevel error -show_chapters "$outputFile" 2>&1 | Out-String
+    $oldPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
     $probe = & ffprobe -hide_banner -show_chapters "$outputFile" 2>&1 | Out-String
 
+    $ErrorActionPreference = $oldPref
     $report = @()
     $report += "✅ Output created successfully:"
     $report += "Path: $outputFile"
