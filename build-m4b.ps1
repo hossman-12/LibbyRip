@@ -34,13 +34,19 @@ function Show-TextWindow([string]$title, [string]$text) {
     $form.ShowDialog() | Out-Null
 }
 
-function Pick-Folder([string]$desc) {
+# function Pick-Folder([string]$desc) {
+#     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+#     $dlg.Description = $desc
+#     if ($dlg.ShowDialog() -ne "OK") { return $null }
+#     return $dlg.SelectedPath
+# }
+function Pick-Folder([string]$desc, [string]$defaultPath) {
     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
     $dlg.Description = $desc
+    $dlg.SelectedPath = $defaultPath   # ✅ default folder
     if ($dlg.ShowDialog() -ne "OK") { return $null }
     return $dlg.SelectedPath
 }
-
 function Pick-SaveFile([string]$title, [string]$initialDir, [string]$defaultName) {
     $dlg = New-Object System.Windows.Forms.SaveFileDialog
     $dlg.Title = $title
@@ -130,7 +136,8 @@ try {
     Ensure-Command "ffprobe" | Out-Null
 
     # 1) Pick audiobook directory (GUI)
-    $bookDir = Pick-Folder "Select audiobook directory (contains Part XXX.mp3 and metadata\metadata.json)"
+    #$bookDir = Pick-Folder "Select audiobook directory (contains Part XXX.mp3 and metadata\metadata.json)"
+    $bookDir = Pick-Folder "Select audiobook directory (contains Part XXX.mp3 and metadata\metadata.json)" $launchDir
     if (-not $bookDir) { throw "No audiobook directory selected." }
 
     $bookName = Split-Path $bookDir -Leaf
