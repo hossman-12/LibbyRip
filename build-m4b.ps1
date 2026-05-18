@@ -164,6 +164,26 @@ Set-Content -Path $LogPath -Value "Log started: $(Get-Date -Format 'u')" -Encodi
 Write-Log "Initialized logging. Log path: $LogPath (keeping $LogBackupsToKeep backups)"
 # -------------------------------------------------------------------
 
+# Output format string. Use placeholders like %LaunchDir%, %AUTHOR%, %TITLE%, %BOOKDIR%, %BOOKNAME%
+# Examples:
+#   "%LaunchDir%/%AUTHOR%/%TITLE%.m4b"
+#   "%LaunchDir%/AudioBooks/%AUTHOR%/%TITLE%.m4b"
+$OutputFormat = "%LaunchDir%/AudioBooks/%AUTHOR%/%TITLE%.m4b"
+
+function Expand-OutputFormat([string]$fmt, [hashtable]$vars) {
+    if (-not $fmt) { return "" }
+    $result = $fmt
+    foreach ($k in $vars.Keys) {
+        $pattern = [regex]::Escape("%$k%")
+        $result = [regex]::Replace($result, $pattern, [string]$vars[$k], [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    }
+    # Normalize separators to backslashes and collapse repeats
+    $result = $result -replace '/', '\\'
+    $result = $result -replace '\\\\+', '\\'
+    return $result
+}
+
+
 function Inject-AuthorNarratorTags([string]$ffmetaPath, [string]$author, [string]$narrator, [string]$title) {
     # Adds artist/album_artist/comment/title/album tags (if not already present) right after ;FFMETADATA1
     # Follows tag guidance from: https://github.com/seanap/Plex-Audiobook-Guide#tags-that-are-being-set
@@ -240,9 +260,19 @@ try {
     $authorPreview = Clean-Name($detected.Author)
     if (-not $authorPreview) { $authorPreview = "Unknown Author" }
     if ($metaTitle) { $titlePreview = Clean-Name($metaTitle) } else { $titlePreview = Clean-Name($bookName) }
-    $outputDirPreview = Join-Path $launchDir $authorPreview
-    $outputDirPreview = Join-Path $outputDirPreview $titlePreview
-    $outputFilePreview = Join-Path $outputDirPreview "$titlePreview.m4b"
+    $previewVars = @{
+        "LaunchDir" = $launchDir
+        "AUTHOR"    = $authorPreview
+        "TITLE"     = $titlePreview
+        "BOOKDIR"   = $bookDir
+        "BOOKNAME"  = $bookName
+    }
+    $outputFilePreview = Expand-OutputFormat $OutputFormat $previewVars
+    try {
+        $outputFilePreview = [System.IO.Path]::GetFullPath($outputFilePreview)
+    } catch {
+        # If GetFullPath fails (malformed), fall back to raw preview
+    }
 
     # If an ffmetadata file already exists, try to extract a narrator from its comment field
     $composerFromComment = ""
@@ -340,18 +370,22 @@ try {
     $authorClean = Clean-Name($author)
     if ($metaTitle) { $titleClean = Clean-Name($metaTitle) } else { $titleClean  = Clean-Name($bookName) }
 
-    # Build full output directory
-    $outputDir = Join-Path $launchDir $authorClean
-    $outputDir = Join-Path $outputDir $titleClean
+    $vars = @{
+        "LaunchDir" = $launchDir
+        "AUTHOR"    = $authorClean
+        "TITLE"     = $titleClean
+        "BOOKDIR"   = $bookDir
+        "BOOKNAME"  = $bookName
+    }
+    $OutputFile = Expand-OutputFormat $OutputFormat $vars
+    $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
+    $outputDir = Split-Path $OutputFile -Parent
 
     # Create directory structure if it doesn't exist
     if (-not (Test-Path $outputDir)) {
         New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     }
     Write-Log "Ensured output directory exists: $outputDir"
-
-    # Final output file path
-    $OutputFile = Join-Path $outputDir "$titleClean.m4b"
 
     if (Test-Path $OutputFile) {
         $choice = [System.Windows.Forms.MessageBox]::Show(
