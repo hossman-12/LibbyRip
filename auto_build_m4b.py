@@ -42,7 +42,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -242,26 +245,271 @@ def find_existing_m4b(basename: str, audio_books_dir: Path) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Subprocess helpers
+# Subprocess helpers (streaming + single-line progress)
 # ---------------------------------------------------------------------------
 
-def _run_with_logging(
+
+def _format_hms(seconds: float) -> str:
+    """Format ``seconds`` as ``H:MM:SS`` (drops the hour field if zero)."""
+    s = max(0, int(seconds))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
+
+
+def _write_subprocess_log_line(
+    script_name: str, line: str, log_path: Path
+) -> None:
+    """Write a single non-blank line to the log with the standard header.
+
+    Mirrors ``_write_subprocess_log`` for the streaming path: one log line
+    per child stdout/stderr line, each carrying its own ``[date stamp]
+    [script]`` prefix so the log can be grepped / filtered line-by-line.
+    """
+    if not line.strip():
+        return
+    entry = f"[{_timestamp()}] [{script_name}] {line}\n"
+    try:
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(entry)
+    except OSError:
+        print(entry.rstrip("\n"), file=sys.stderr)
+
+
+def _ffmeta_total_seconds(ffmeta_path: Path) -> Optional[float]:
+    """Return the total audiobook duration in seconds from the ffmetadata.
+
+    The ``ffmetadata`` file produced by ``buildChapters.py --ffmpeg`` uses
+    ``TIMEBASE=1/1000`` so the ``END=...`` value of the last ``[CHAPTER]``
+    block is the total duration in milliseconds. Returns ``None`` if the
+    file is missing or has no chapter blocks (which would mean
+    ``buildChapters`` produced something unexpected).
+    """
+    if not ffmeta_path.is_file():
+        return None
+    try:
+        text = ffmeta_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    ends = re.findall(r"(?m)^\s*END=(\d+)\s*$", text)
+    if not ends:
+        return None
+    try:
+        return int(ends[-1]) / 1000.0
+    except ValueError:
+        return None
+
+
+def _stream_subprocess_lines(
+    stream,
+    label: str,
+    log_path: Path,
+    sink: list,
+    progress_state: Optional[dict],
+    line_lock: threading.Lock,
+) -> None:
+    """Read ``stream`` line by line until EOF.
+
+    Each non-blank line is appended to ``sink`` (under ``line_lock`` so the
+    parent can read it concurrently) and forwarded to the shared log file.
+    When ``progress_state`` is provided, the latest
+    ``time=HH:MM:SS.FF`` value from ffmpeg's stderr is recorded so the
+    spinner can show progress against the total duration.
+    """
+    for line in iter(stream.readline, ""):
+        stripped = line.rstrip("\n")
+        if stripped.strip():
+            _write_subprocess_log_line(label, stripped, log_path)
+        with line_lock:
+            sink.append(line)
+        if progress_state is not None:
+            m = re.search(r"time=(\d+):(\d+):(\d+\.\d+)", line)
+            if m:
+                h, mm, s = m.groups()
+                progress_state["time_seconds"] = (
+                    int(h) * 3600 + int(mm) * 60 + float(s)
+                )
+
+
+def _spin_until(stop_event: threading.Event, get_message) -> None:
+    """Background thread target that refreshes a single line in place.
+
+    Updates ``get_message()`` every 200 ms until ``stop_event`` is set,
+    using ``\\r`` so the line stays on the same row. Used by ``_StepLine``.
+    """
+    frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    i = 0
+    while not stop_event.wait(0.2):
+        glyph = frames[i % len(frames)]
+        try:
+            msg = get_message()
+        except Exception:
+            msg = ""
+        sys.stdout.write(f"\r{glyph} {msg}   ")
+        sys.stdout.flush()
+        i += 1
+
+
+class _StepLine:
+    """A self-erasing single-line progress display for one step of work.
+
+    While the step is running, the line refreshes in place via ``\\r``:
+    ``⠋ Extracting foo.zip ... 0:06`` -- the spinner glyph rotates and
+    the status string (default ``elapsed M:SS``) is updated every 200 ms.
+
+    On ``finish()`` (or context-manager exit) the spinner glyph is
+    replaced with ``✓`` (success) or ``✗`` (failure) and the line is
+    committed to its own row with ``\\n``, so the next step starts on a
+    fresh line.
+
+    In a non-TTY context the class falls back to plain prints so logs
+    remain self-explanatory.
+
+    Usage::
+
+        with _StepLine("Extracting foo.zip"):
+            do_slow_work()
+
+        step = _StepLine("ffmpeg", get_message=progress_message)
+        try:
+            rc = run_thing()
+        finally:
+            step.finish(rc)
+    """
+
+    _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _OK = "✓"
+    _FAIL = "✗"
+
+    def __init__(self, label: str, get_message=None):
+        self.label = label
+        self.start = time.monotonic()
+        self.use_spinner = sys.stdout.isatty()
+        self._stop = threading.Event()
+        self._done = False
+        self._lock = threading.Lock()
+        self._final_msg = ""
+
+        if get_message is None:
+            get_message = self._default_message
+        self.get_message = get_message
+
+        if self.use_spinner:
+            self._thread = threading.Thread(target=self._spin_loop, daemon=True)
+            self._render(f"{self._SPINNER[0]} {self.label} ... ?")
+            self._thread.start()
+        else:
+            print(f"... {self.label}", flush=True)
+
+    def _default_message(self) -> str:
+        return _format_hms(time.monotonic() - self.start)
+
+    def _render(self, text: str) -> None:
+        with self._lock:
+            self._final_msg = text
+            sys.stdout.write("\r" + text + "   ")
+            sys.stdout.flush()
+
+    def _clear(self) -> None:
+        with self._lock:
+            # Erase whatever we last drew on this row.
+            sys.stdout.write("\r" + " " * (len(self._final_msg) + 4) + "\r")
+            sys.stdout.flush()
+
+    def _spin_loop(self) -> None:
+        i = 0
+        while not self._stop.wait(0.2):
+            glyph = self._SPINNER[i % len(self._SPINNER)]
+            try:
+                msg = self.get_message()
+            except Exception:
+                msg = "?"
+            self._render(f"{glyph} {self.label} ... {msg}")
+            i += 1
+
+    def finish(self, exit_code: int = 0) -> None:
+        """Commit the final line. Safe to call multiple times."""
+        with self._lock:
+            if self._done:
+                return
+            self._done = True
+        if self.use_spinner:
+            self._stop.set()
+            self._thread.join(timeout=1.0)
+            try:
+                msg = self.get_message()
+            except Exception:
+                msg = _format_hms(time.monotonic() - self.start)
+            glyph = self._OK if exit_code == 0 else self._FAIL
+            self._clear()
+            sys.stdout.write(f"{glyph} {self.label} ... {msg}\n")
+            sys.stdout.flush()
+        else:
+            elapsed = _format_hms(time.monotonic() - self.start)
+            status = "OK" if exit_code == 0 else f"FAIL ({exit_code})"
+            print(
+                f"    {self.label} ... {elapsed}  [{status}]",
+                flush=True,
+            )
+
+    def __enter__(self) -> "_StepLine":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if not self._done:
+            self.finish(0 if exc_type is None else 1)
+
+
+def _run_with_progress(
     argv,
     *,
     label: str,
     log_path: Path,
     input_text: Optional[str] = None,
     cwd: Optional[Path] = None,
+    total_duration_seconds: Optional[float] = None,
 ) -> subprocess.CompletedProcess:
-    """Run a subprocess, stream stdout/stderr into the log, and return the
-    completed process object.
+    """Run a subprocess with real-time log streaming and a single-line status.
 
-    On Linux ffmpeg and friends write progress to stderr, so we capture both
-    streams, decode them as text, and re-emit each line through
-    ``_write_subprocess_log``. The function returns once the child exits; the
-    caller checks ``returncode``.
+    Streams child stdout/stderr line-by-line into the shared log file (one
+    ``[date stamp] [script]`` header per line) while drawing a single-line
+    ``⠋ <label> ... <status>`` indicator on stdout. For ffmpeg we parse
+    the ``time=`` value from stderr and show audio progress against
+    ``total_duration_seconds``; for other tools the status is just the
+    elapsed time.
+
+    Returns a ``CompletedProcess`` whose stdout/stderr are the accumulated
+    text written by the child. Callers that inspect those streams continue
+    to work unchanged.
+
+    The spinner glyphs are only drawn when stdout is a TTY; in non-TTY
+    contexts the step line falls back to plain prints.
     """
     _write_log(f"Running {label}", log_path)
+
+    progress_state: Optional[dict] = (
+        {"time_seconds": 0.0} if total_duration_seconds else None
+    )
+    line_lock = threading.Lock()
+    stdout_sink: list[str] = []
+    stderr_sink: list[str] = []
+    start_time = time.monotonic()
+
+    def get_message() -> str:
+        elapsed = time.monotonic() - start_time
+        if progress_state is not None and progress_state["time_seconds"] > 0:
+            current = progress_state["time_seconds"]
+            pct = min(100.0, current / total_duration_seconds * 100)
+            return (
+                f"{_format_hms(current)} / {_format_hms(total_duration_seconds)}"
+                f" ({pct:.0f}%)  elapsed {_format_hms(elapsed)}"
+            )
+        return f"elapsed {_format_hms(elapsed)}"
+
+    step = _StepLine(f"Running {label}", get_message=get_message)
+
     process = subprocess.Popen(
         list(argv),
         stdin=subprocess.PIPE if input_text is not None else None,
@@ -272,13 +520,67 @@ def _run_with_logging(
         errors="replace",
         cwd=str(cwd) if cwd else None,
     )
-    stdout, stderr = process.communicate(input=input_text)
-    if stdout:
-        _write_subprocess_log(label, stdout, log_path)
-    if stderr:
-        _write_subprocess_log(label, stderr, log_path)
+
+    try:
+        if input_text is not None:
+            try:
+                process.stdin.write(input_text)
+                process.stdin.close()
+            except BrokenPipeError:
+                pass
+
+        reader_threads = [
+            threading.Thread(
+                target=_stream_subprocess_lines,
+                args=(
+                    process.stdout,
+                    label,
+                    log_path,
+                    stdout_sink,
+                    None,
+                    line_lock,
+                ),
+                daemon=True,
+            ),
+            threading.Thread(
+                target=_stream_subprocess_lines,
+                args=(
+                    process.stderr,
+                    label,
+                    log_path,
+                    stderr_sink,
+                    progress_state,
+                    line_lock,
+                ),
+                daemon=True,
+            ),
+        ]
+        for t in reader_threads:
+            t.start()
+
+        try:
+            process.wait()
+        except KeyboardInterrupt:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            raise
+
+        for t in reader_threads:
+            t.join(timeout=2.0)
+    finally:
+        step.finish(getattr(process, "returncode", 1) or 0)
+
     _write_log(f"{label} exit code: {process.returncode}", log_path)
-    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(
+        argv,
+        process.returncode,
+        "".join(stdout_sink),
+        "".join(stderr_sink),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +642,13 @@ def process_one_zip(
 
     try:
         _write_log(f"Extracting {zip_path.name}", log_path)
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(temp_extract)
+        # Show a single-line progress indicator while the silent zip
+        # extraction runs. On a TTY the spinner refreshes in place; in
+        # non-TTY contexts we still bracket the work with a "..." line
+        # so logs are self-explanatory.
+        with _StepLine(f"Extracting {zip_path.name}"):
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(temp_extract)
 
         metadata_dir = temp_extract / "metadata"
         metadata_json = metadata_dir / "metadata.json"
@@ -371,7 +678,7 @@ def process_one_zip(
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Step 1: bake metadata into the per-part MP3s.
-        bake = _run_with_logging(
+        bake = _run_with_progress(
             [sys.executable, str(script_dir / "bakeMetadata.py"), str(temp_extract)],
             label="bakeMetadata.py",
             log_path=log_path,
@@ -390,7 +697,7 @@ def process_one_zip(
 
         # Step 2: build ffmetadata and chapters.txt.
         meta_text = metadata_json.read_text(encoding="utf-8")
-        bc_ffmpeg = _run_with_logging(
+        bc_ffmpeg = _run_with_progress(
             [sys.executable, str(script_dir / "buildChapters.py"), "--ffmpeg"],
             label="buildChapters.py",
             log_path=log_path,
@@ -401,7 +708,7 @@ def process_one_zip(
             _write_log(f"buildChapters.py --ffmpeg stderr tail: {tail}", log_path)
         write_utf8_no_bom(ffmeta_txt, (bc_ffmpeg.stdout or "").rstrip())
 
-        bc_chapters = _run_with_logging(
+        bc_chapters = _run_with_progress(
             [sys.executable, str(script_dir / "buildChapters.py"), "--chapters"],
             label="buildChapters.py",
             log_path=log_path,
@@ -421,7 +728,7 @@ def process_one_zip(
             encoding="ascii",
         )
 
-        ffmpeg = _run_with_logging(
+        ffmpeg = _run_with_progress(
             [
                 ensure_command("ffmpeg"),
                 "-y",
@@ -445,6 +752,7 @@ def process_one_zip(
             label="ffmpeg",
             log_path=log_path,
             cwd=temp_extract,
+            total_duration_seconds=_ffmeta_total_seconds(ffmeta_txt),
         )
 
         if not output_file.is_file():
@@ -464,7 +772,7 @@ def process_one_zip(
             )
 
         # Step 4: ffprobe the result for diagnostic logging.
-        _run_with_logging(
+        _run_with_progress(
             [
                 ensure_command("ffprobe"),
                 "-hide_banner",
@@ -564,7 +872,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     _write_log(f"Found {len(zips)} zip files", log_path)
     print(f"Found {len(zips)} zip file(s) in {BOOKS_DIR}")
 
-    to_convert = build_queue()
+    # ``build_queue`` walks every zip through ``find_existing_m4b`` which
+    # does ``AudioBooks.rglob`` -- silent but potentially slow on a FUSE
+    # mount. Show a single-line indicator so the user knows the script
+    # hasn't hung between "Found N zips" and the conversion report.
+    with _StepLine("Scanning books for already-converted audiobooks"):
+        to_convert = build_queue()
     print(f"Files queued for conversion: {len(to_convert)}")
     _write_log(f"Files queued for conversion count: {len(to_convert)}", log_path)
     if args.detail:
