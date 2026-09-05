@@ -1,2 +1,18 @@
-eyeD3
-PyQt5
+# Headless / CLI dependencies. These are required on every platform and are
+# the only Python packages the conversion pipeline needs.
+#
+#   eyed3  - reads and writes ID3 tags on the per-part MP3s.
+#
+# PyQt5 is only required for ``bakeMetadata.py --gui`` mode and is not needed
+# on a headless Linux box. The script imports PyQt5 lazily so it can be
+# installed (or skipped) independently of the rest of the pipeline.
+#
+# System packages (Debian 13 / Ubuntu):
+#   ffmpeg, ffprobe, python3, python3-pip, python3-venv
+#
+# Usage:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+
+eyed3>=0.9

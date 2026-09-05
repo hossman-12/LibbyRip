@@ -1,0 +1,39 @@
+{
+  "title": "Drive",
+  "description": {
+    "full": "<b>A short story set in the universe of James S. A. Corey's <i>NYT</i> best-selling Expanse series. Now a Prime Original series. This story will be available in the complete Expanse story collection, <i>Memory’s Legion</i>.</b><br> <b>HUGO AWARD WINNER FOR BEST SERIES</b><br> <b>The Expanse</b><br><i>Leviathan Wakes<br>Caliban's War<br>Abaddon's Gate<br>Cibola Burn<br>Nemesis Games<br>Babylon's Ashes<br>Persepolis Rising<br>Tiamat's Wrath<br>​Leviathan Falls<br>Memory's Legion</i><br><b>The Expanse Short Fiction</b><br><i>Drive<br>The Butcher of Anderson Station</i><br><i>Gods of Risk</i><br><i>The Churn</i><br><i>The Vital Abyss</i><br><i>Strange Dogs</i><br><i>Auberon<br>The Sins of Our Fathers</i>",
+    "short": "<b>A short story set in the universe of James S. A. Corey's <i>NYT</i> best-selling Expanse series. Now a Prime Original series. This story will be available in the complete Expanse story collection, <i>Memory’s Legion</i>.</b><br> <b>HUGO AWARD WINNER FOR BEST SERIES</b><br> <b>The Expanse</b><br><i>Leviathan Wakes<br>Caliban's War<br>Abaddon's Gate<br>Cibola Burn<br>Nemesis Games<br>Babylon's Ashes<br>Persepolis Rising<br>Tiamat's Wrath<br>​Leviathan Falls<br>Memory's Legion</i><br><b>The Expanse Short Fiction</b><br><i>Drive<br>The Butcher of Anderson Station</i><br><i>Gods of Risk</i><br><i>The Churn</i><br><i>The Vital Abyss</i><br><i>Strange Dogs</i><br><i>Auberon<br>The Sins of Our Fathers</i>"
+  },
+  "coverUrl": "https://libbyapp.com/covers/resize?type=auto&width=536&quality=80&force=true&height=536&url=%2FImageType-400%2F4575-1%2F869%2FBE4%2FC9%2F%257B869BE4C9-E595-42DE-95A6-60858F2B732C%257DImg400.jpg",
+  "creator": [
+    {
+      "name": "James S. A. Corey",
+      "role": "author",
+      "bio": ""
+    },
+    {
+      "name": "Jefferson Mays",
+      "role": "narrator",
+      "bio": ""
+    }
+  ],
+  "spine": [
+    {
+      "duration": 3460.44075,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    }
+  ],
+  "chapters": [
+    {
+      "title": "Drive",
+      "spine": 0,
+      "offset": 0
+    },
+    {
+      "title": "Closing",
+      "spine": 0,
+      "offset": 3360
+    }
+  ]
+}

@@ -5,6 +5,12 @@ import re
 import sys
 from typing import Any, List
 
+# Shared logging helper. The shared log file is configured by setting the
+# LIBBYRIP_LOG_FILE environment variable (normally done by
+# auto_built-m4b.ps1). Without that variable, log lines go to stderr in the
+# same format so this script remains useful when run by hand.
+from log_helper import log as _log
+
 
 @dataclass(frozen=True)
 class Chapter:
@@ -49,6 +55,27 @@ class Metadata:
             sum(spine["duration"] for spine in spines[:spine_index])
             for spine_index in range(len(spines))
         ]
+
+        # Sort chapters by (spine, offset) before building the global chapter list.
+        # Some Libby exports deliver chapters in an order that does not match their
+        # offsets (e.g. a track that is actually chapter N+1 may appear with the
+        # offset of chapter N). Without this sort, the next-chapter / end-time
+        # pairing below can produce an END that is before START, which FFmpeg
+        # rejects when loading the ffmetadata file.
+        chapters = sorted(chapters, key=lambda c: (c["spine"], c["offset"]))
+
+        # Nudge chapters that share an exact (spine, offset) with an earlier one
+        # forward by 1 ms so the generated list is strictly monotonic in time.
+        # This matches the same correction done by bakeMetadata.py for the
+        # per-part ID3 chapter tags.
+        prev_total_ms: float = -1.0
+        for chapter in chapters:
+            total_ms = (chapter["offset"] + spine_offsets[chapter["spine"]]) * 1000.0
+            if total_ms <= prev_total_ms:
+                prev_total_ms += 1.0
+                chapter["offset"] = (prev_total_ms / 1000.0) - spine_offsets[chapter["spine"]]
+            else:
+                prev_total_ms = total_ms
 
         chapters = [
             Chapter(
@@ -144,18 +171,33 @@ def metadata_to_ffmpeg(metadata: Metadata) -> str:
 
 
 if __name__ == "__main__":
+    SCRIPT_NAME = "buildChapters.py"
     if len(sys.argv) == 1 or sys.argv[1] == "--chapters":
         format = metadata_to_chapters_txt
+        mode_label = "chapters"
     elif sys.argv[1] == "--ffmpeg":
         format = metadata_to_ffmpeg
+        mode_label = "ffmpeg"
     else:
-        print(
+        msg = (
             f"Usage: {sys.argv[0]} [--chapters | --ffmpeg]"
             " < metadata.json > chapters.txt"
         )
+        _log(SCRIPT_NAME, msg)
+        print(msg)
         exit(1)
 
+    _log(SCRIPT_NAME, f"mode={mode_label}; reading metadata.json from stdin")
     raw_metadata = json.load(sys.stdin)
-    metadata = Metadata.from_json(raw_metadata)
+    _log(SCRIPT_NAME, f"loaded metadata: title={raw_metadata.get('title', '<none>')}; "
+                       f"spines={len(raw_metadata.get('spine', []))}; "
+                       f"chapters={len(raw_metadata.get('chapters', []))}")
 
-    print(format(metadata))
+    metadata = Metadata.from_json(raw_metadata)
+    _log(SCRIPT_NAME, f"parsed {len(metadata.chapters)} chapters; "
+                       f"author={metadata.author}; narrator={metadata.narrator}; "
+                       f"total_duration={metadata.total_duration}")
+
+    output = format(metadata)
+    print(output)
+    _log(SCRIPT_NAME, f"wrote {mode_label} output ({len(output)} chars)")
