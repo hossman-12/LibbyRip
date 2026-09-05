@@ -12,7 +12,16 @@ scripts share the same log file format and the same set of helper functions
 where possible.
 
 Usage:
-    python auto_build_m4b.py [--dry-run] [--detail]
+    python3 auto_build_m4b.py [--dry-run] [--detail]
+
+Note:
+    On this Debian 13 machine the repo lives on a rclone/FUSE OneDrive
+    mount, which silently strips the execute bit on every file. Running
+    ``./auto_build_m4b.py`` therefore fails with
+    ``/usr/bin/env: bad interpreter: Permission denied`` even after
+    ``chmod +x``. Always invoke the script through ``python3`` (or via
+    the launcher ``libbyrip-build`` installed in ``~/.local/bin``) so
+    the script file does not need to be executable.
 
 Options:
     --dry-run    Preview what would be converted without producing any files.
@@ -533,7 +542,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     _write_log(f"BooksDir resolved to: {BOOKS_DIR}", log_path)
 
     try:
-        ensure_command("python")
+        # Verify the interpreter that's actually running this script. On
+        # Debian there is no ``python`` binary (only ``python3``), so we
+        # accept either name and resolve via PATH if needed.
+        python_path = shutil.which(sys.executable) or ensure_command("python3")
+        if not python_path:
+            raise RuntimeError("Python interpreter was not found on PATH.")
         ensure_command("ffmpeg")
         ensure_command("ffprobe")
     except RuntimeError as exc:

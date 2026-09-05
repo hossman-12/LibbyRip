@@ -14,6 +14,7 @@ format.
 | File | Purpose |
 |---|---|
 | `auto_build_m4b.py` | Python orchestrator. Scans `Books/`, skips already-converted zips, runs the full pipeline for the rest. |
+| `bin/libbyrip-build.sh` | Bash launcher. Use this if `auto_build_m4b.py` reports `bad interpreter: Permission denied` (common on rclone/OneDrive mounts). |
 | `auto_built-m4b.ps1` | Original PowerShell orchestrator (kept for Windows). |
 | `bakeMetadata.py` | Bakes ID3 tags + chapters into each per-part MP3 via `eyed3`. |
 | `buildChapters.py` | Generates `metadata.txt` (FFmetadata) and `chapters.txt` from `metadata.json`. |
@@ -53,23 +54,48 @@ imports it lazily and only when `--gui` is passed.
 
 ## Usage
 
+The orchestrator is `auto_build_m4b.py`. The recommended invocation on
+Debian 13 is via the bash launcher, which works even when the repo lives
+on a filesystem that strips the execute bit (rclone/FUSE OneDrive mount,
+`noexec` mount, etc.):
+
+```bash
+# one-time install (from inside the repo):
+mkdir -p ~/.local/bin
+install -m 0755 bin/libbyrip-build.sh ~/.local/bin/libbyrip-build
+# make sure ~/.local/bin is on PATH (it usually is on Debian):
+#   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
 ### Convert every `Books/*.zip` that has not yet been converted
 
 ```sh
-python auto_build_m4b.py
+libbyrip-build
+# or, equivalently:
+python3 auto_build_m4b.py
 ```
 
 ### Preview what would be converted (no files written)
 
 ```sh
-python auto_build_m4b.py --dry-run
+libbyrip-build --dry-run
+# or:
+python3 auto_build_m4b.py --dry-run
 ```
 
 ### Show queued paths and other diagnostic detail
 
 ```sh
-python auto_build_m4b.py --detail
+libbyrip-build --detail
+# or:
+python3 auto_build_m4b.py --detail
 ```
+
+> **Direct invocation `./auto_build_m4b.py` will fail** on rclone/OneDrive
+> mounts with `/usr/bin/env: bad interpreter: Permission denied`. That is
+> the kernel refusing to execute a file without the execute bit; it is
+> not a bug in the script. Always use `libbyrip-build` or
+> `python3 auto_build_m4b.py`.
 
 ## Directory layout expected
 
