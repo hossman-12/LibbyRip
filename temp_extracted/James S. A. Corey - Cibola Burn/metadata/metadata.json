@@ -1,0 +1,434 @@
+{
+  "title": "Cibola Burn",
+  "description": {
+    "full": "<b>With over 10 million copies sold, The Expanse has become one of the biggest science fiction phenomenons of the decade.<br> The fourth book in the <i>New York Times </i>bestselling Expanse series, <i>Cibola Burn</i> sees the crew of the Rocinante on a new frontier, as the rush to colonize the new planets threatens to outrun law and order and give way to war and chaos. Now a Prime Original series.</b><br> Enter a new frontier ...<br><i>\"An empty apartment, a missing family, that's creepy. But this is like finding a military base with no one on it. Fighters and tanks idling on the runway with no drivers. This is bad juju. Something wrong happened here. What you should do is tell everyone to leave.\"</i><br> The gates have opened the way to a thousand new worlds and the rush to colonize has begun. Settlers looking for a new life stream out from humanity's home planets. Ilus, the first human colony on this vast new frontier, is being born in blood and fire. Independent settlers stand against the overwhelming power of a corporate colony ship with only their determination, courage, and the skills learned in the long wars of home. Innocent scientists are slaughtered as they try to survey a new and alien world. The struggle on Ilus threatens to spread all the way back to Earth.<br> James Holden and the crew of his one small ship are sent to make peace in the midst of war and sense in the midst of chaos. But the more he looks at it, the more Holden thinks the mission was meant to fail. And the whispers of a dead man remind him that the great galactic civilization that once stood on this land is gone. And that something killed it.<br><b>\"Interplanetary adventure the way it ought to be written.\" —George R. R. Martin<br> Hugo Award Winner for Best Series</b><br><b>The Expanse</b><br><i>Leviathan Wakes <br> Caliban's War <br> Abaddon's Gate <br> Cibola Burn <br> Nemesis Games <br> Babylon's Ashes <br> Persepolis Rising <br> Tiamat's Wrath ​<br> Leviathan Falls <br> Memory's Legion</i><br><b>The Expanse Short Fiction</b><br><i>Drive <br> The Butcher of Anderson Station<br> Gods of Risk<br> The Churn<br> The Vital Abyss<br> Strange Dogs<br> Auberon <br> The Sins of Our Fathers​</i>",
+    "short": "<b>With over 10 million copies sold, The Expanse has become one of the biggest science fiction phenomenons of the decade.<br> The fourth book in the <i>New York Times </i>bestselling Expanse series, <i>Cibola Burn</i> sees the crew of the Rocinante on a new frontier, as the rush to colonize the new planets threatens to outrun law and order and give way to war and chaos. Now a Prime Original series.</b><br> Enter a new frontier ...<br><i>\"An empty apartment, a missing family, that's creepy. But this is like finding a military base with no one on it. Fighters and tanks idling on the runway with no drivers. This is bad juju. Something wrong happened here. What you should do is tell everyone to leave.\"</i><br> The gates have opened the way to a thousand new worlds and the rush to colonize has begun. Settlers looking for a new life stream out from humanity's home planets. Ilus, the first human colony on this vast new frontier, is being born in blood and fire...."
+  },
+  "coverUrl": "https://libbyapp.com/covers/resize?type=auto&width=536&quality=80&force=true&height=536&url=%2FImageType-400%2F0887-1%2F6B1%2F98E%2F95%2F%257B6B198E95-3AFA-4968-9239-EC8D77AEEE93%257DImg400.jpg",
+  "creator": [
+    {
+      "name": "James S. A. Corey",
+      "role": "author",
+      "bio": ""
+    },
+    {
+      "name": "Jefferson Mays",
+      "role": "narrator",
+      "bio": ""
+    }
+  ],
+  "spine": [
+    {
+      "duration": 4493.60975,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4204.43425,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4429.40075,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3961.99175,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3706.697125,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4664.032625,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4053.2375,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3911.079125,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3688.80325,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4658.4685,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3751.601625,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3840.992625,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3644.943625,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 4059.58525,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3829.8905,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3961.913375,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3732.924,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    },
+    {
+      "duration": 3853.740375,
+      "type": "audio/mpeg",
+      "bitrate": 64
+    }
+  ],
+  "chapters": [
+    {
+      "title": "Prologue",
+      "spine": 0,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 1",
+      "spine": 0,
+      "offset": 728
+    },
+    {
+      "title": "Chapter 2",
+      "spine": 0,
+      "offset": 2055
+    },
+    {
+      "title": "Chapter 3",
+      "spine": 0,
+      "offset": 3451
+    },
+    {
+      "title": "Interlude",
+      "spine": 1,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 4",
+      "spine": 1,
+      "offset": 322
+    },
+    {
+      "title": "Chapter 5",
+      "spine": 1,
+      "offset": 1702
+    },
+    {
+      "title": "Chapter 6",
+      "spine": 1,
+      "offset": 2961
+    },
+    {
+      "title": "Chapter 7",
+      "spine": 2,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 8",
+      "spine": 2,
+      "offset": 1133
+    },
+    {
+      "title": "Chapter 9",
+      "spine": 2,
+      "offset": 2112
+    },
+    {
+      "title": "Chapter 10",
+      "spine": 2,
+      "offset": 3347
+    },
+    {
+      "title": "Chapter 11",
+      "spine": 3,
+      "offset": 0
+    },
+    {
+      "title": "Interlude",
+      "spine": 3,
+      "offset": 1283
+    },
+    {
+      "title": "Chapter 12",
+      "spine": 3,
+      "offset": 1511
+    },
+    {
+      "title": "Chapter 13",
+      "spine": 3,
+      "offset": 2712
+    },
+    {
+      "title": "Chapter 14",
+      "spine": 4,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 15",
+      "spine": 4,
+      "offset": 1256
+    },
+    {
+      "title": "Chapter 16",
+      "spine": 4,
+      "offset": 2345
+    },
+    {
+      "title": "Chapter 17",
+      "spine": 5,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 18",
+      "spine": 5,
+      "offset": 1230
+    },
+    {
+      "title": "Chapter 19",
+      "spine": 5,
+      "offset": 2640
+    },
+    {
+      "title": "Chapter 20",
+      "spine": 5,
+      "offset": 3795
+    },
+    {
+      "title": "Chapter 21",
+      "spine": 6,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 22",
+      "spine": 6,
+      "offset": 1291
+    },
+    {
+      "title": "Interlude",
+      "spine": 6,
+      "offset": 2557
+    },
+    {
+      "title": "Chapter 23",
+      "spine": 6,
+      "offset": 2820
+    },
+    {
+      "title": "Chapter 24",
+      "spine": 7,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 25",
+      "spine": 7,
+      "offset": 1333
+    },
+    {
+      "title": "Chapter 26",
+      "spine": 7,
+      "offset": 2754
+    },
+    {
+      "title": "Chapter 27",
+      "spine": 8,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 28",
+      "spine": 8,
+      "offset": 1274
+    },
+    {
+      "title": "Chapter 29",
+      "spine": 8,
+      "offset": 2457
+    },
+    {
+      "title": "Chapter 30",
+      "spine": 9,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 31",
+      "spine": 9,
+      "offset": 1281
+    },
+    {
+      "title": "Chapter 32",
+      "spine": 9,
+      "offset": 2400
+    },
+    {
+      "title": "Chapter 33",
+      "spine": 9,
+      "offset": 3658
+    },
+    {
+      "title": "Interlude",
+      "spine": 10,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 34",
+      "spine": 10,
+      "offset": 223
+    },
+    {
+      "title": "Chapter 35",
+      "spine": 10,
+      "offset": 1363
+    },
+    {
+      "title": "Chapter 36",
+      "spine": 10,
+      "offset": 2535
+    },
+    {
+      "title": "Chapter 37",
+      "spine": 11,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 38",
+      "spine": 11,
+      "offset": 1361
+    },
+    {
+      "title": "Chapter 39",
+      "spine": 11,
+      "offset": 2595
+    },
+    {
+      "title": "Chapter 40",
+      "spine": 12,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 41",
+      "spine": 12,
+      "offset": 1195
+    },
+    {
+      "title": "Chapter 42",
+      "spine": 12,
+      "offset": 2395
+    },
+    {
+      "title": "Chapter 43",
+      "spine": 13,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 44",
+      "spine": 13,
+      "offset": 1237
+    },
+    {
+      "title": "Interlude",
+      "spine": 13,
+      "offset": 2415
+    },
+    {
+      "title": "Chapter 45",
+      "spine": 13,
+      "offset": 2753
+    },
+    {
+      "title": "Chapter 46",
+      "spine": 14,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 47",
+      "spine": 14,
+      "offset": 1248
+    },
+    {
+      "title": "Chapter 48",
+      "spine": 14,
+      "offset": 2527
+    },
+    {
+      "title": "Chapter 49",
+      "spine": 15,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 50",
+      "spine": 15,
+      "offset": 1328
+    },
+    {
+      "title": "Chapter 51",
+      "spine": 15,
+      "offset": 2594
+    },
+    {
+      "title": "Chapter 52",
+      "spine": 16,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 53",
+      "spine": 16,
+      "offset": 1349
+    },
+    {
+      "title": "Chapter 54",
+      "spine": 16,
+      "offset": 2321
+    },
+    {
+      "title": "Interlude",
+      "spine": 16,
+      "offset": 3508
+    },
+    {
+      "title": "Chapter 55",
+      "spine": 17,
+      "offset": 0
+    },
+    {
+      "title": "Chapter 56",
+      "spine": 17,
+      "offset": 1240
+    },
+    {
+      "title": "Epilogue",
+      "spine": 17,
+      "offset": 2626
+    }
+  ]
+}

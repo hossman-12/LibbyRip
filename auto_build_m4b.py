@@ -302,6 +302,147 @@ def _ffmeta_total_seconds(ffmeta_path: Path) -> Optional[float]:
         return None
 
 
+def _is_transient_extract_error(exc: BaseException) -> bool:
+    """True if ``exc`` is a flaky-mount error we should retry.
+
+    The repo lives on a rclone/OneDrive FUSE mount that occasionally
+    returns ``[Errno 5] Input/output error`` (EIO) or surfaces a
+    ``BadZipFile`` when rclone hasn't fully cached the file. These are
+    transient and clear on retry; other errors (FileNotFoundError,
+    PermissionError, real zip corruption, etc.) propagate immediately.
+    """
+    if isinstance(exc, zipfile.BadZipFile):
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) in (5, 11):
+        # errno 5 = EIO, errno 11 = EAGAIN ("Resource temporarily
+        # unavailable"). Both show up on rclone FUSE under load.
+        return True
+    return False
+
+
+def _sleep_with_spinner(step: "_StepLine", seconds: float) -> None:
+    """Sleep ``seconds`` while the spinner keeps refreshing.
+
+    The Python-level sleep is broken into 200 ms slices so the spinner's
+    background thread can keep painting updated status (e.g. elapsed
+    time) instead of freezing for the full duration.
+    """
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        time.sleep(min(0.2, end - time.monotonic()))
+
+
+def _extract_from_local_copy(
+    zip_path: Path,
+    dest_dir: Path,
+    log_path: Path,
+    step: "_StepLine",
+) -> None:
+    """Copy ``zip_path`` to a local tempfile and extract from there.
+
+    Once the zip is on a local filesystem (not the rclone FUSE mount),
+    all reads are guaranteed and ``zf.extractall`` will not see EIO.
+    The local copy is removed on exit.
+    """
+    local_zip = Path(tempfile.gettempdir()) / (
+        f"libbyrip-{zip_path.stem}-{os.getpid()}.zip"
+    )
+    try:
+        step.set_message_override(
+            f"copying {zip_path.name} to local disk ({local_zip})"
+        )
+        _write_log(
+            f"Local-copy fallback: copying {zip_path.name} -> {local_zip}",
+            log_path,
+        )
+        shutil.copy2(zip_path, local_zip)
+        step.set_message_override("extracting from local copy")
+        with zipfile.ZipFile(local_zip, "r") as zf:
+            zf.extractall(dest_dir)
+        _write_log(
+            f"Local-copy extraction succeeded for {zip_path.name}",
+            log_path,
+        )
+    finally:
+        try:
+            local_zip.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _extract_zip_with_retry(
+    zip_path: Path,
+    dest_dir: Path,
+    log_path: Path,
+    step: "_StepLine",
+    *,
+    max_attempts: int = 3,
+) -> None:
+    """Extract ``zip_path`` to ``dest_dir`` with retry on FUSE transients.
+
+    Tries up to ``max_attempts`` times against the original FUSE-backed
+    path with exponential backoff (2 s, 4 s between attempts). If all
+    attempts fail with a transient error, falls back to copying the zip
+    to a local tempfile and extracting from there. Non-transient errors
+    propagate immediately so the user sees a clear failure.
+
+    ``step`` is updated via ``set_message_override`` during retry
+    sleeps so the spinner shows ``retrying in 2s (attempt 1/3)`` etc.
+    """
+    delays = (2.0, 4.0, 8.0)[: max(0, max_attempts - 1)]
+    last_error: Optional[BaseException] = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(dest_dir)
+            if attempt > 1:
+                _write_log(
+                    f"Extract succeeded on attempt {attempt} for {zip_path.name}",
+                    log_path,
+                )
+            return
+        except Exception as exc:
+            if not _is_transient_extract_error(exc):
+                # Not a flaky-mount error: surface it immediately.
+                raise
+            last_error = exc
+            kind = (
+                f"EIO (errno {exc.errno})"
+                if isinstance(exc, OSError)
+                else type(exc).__name__
+            )
+            if attempt < max_attempts:
+                delay = delays[attempt - 1]
+                msg = (
+                    f"{kind} on attempt {attempt}/{max_attempts}; "
+                    f"retrying in {delay:.0f}s"
+                )
+                _write_log(
+                    f"Transient extract error ({msg}): {exc}",
+                    log_path,
+                )
+                step.set_message_override(f"⚠ {msg}")
+                _sleep_with_spinner(step, delay)
+            else:
+                _write_log(
+                    f"All {max_attempts} attempts failed with {kind}; "
+                    f"falling back to local-copy strategy",
+                    log_path,
+                )
+                step.set_message_override(None)
+
+    # All retries exhausted -- try the local-copy fallback. If that
+    # also fails, propagate the original FUSE error so the caller
+    # sees something descriptive in the log.
+    try:
+        _extract_from_local_copy(zip_path, dest_dir, log_path, step)
+    except Exception:
+        if last_error is not None:
+            raise last_error from None
+        raise
+
+
 def _stream_subprocess_lines(
     stream,
     label: str,
@@ -391,6 +532,7 @@ class _StepLine:
         self._done = False
         self._lock = threading.Lock()
         self._final_msg = ""
+        self._message_override: Optional[str] = None
 
         if get_message is None:
             get_message = self._default_message
@@ -405,6 +547,22 @@ class _StepLine:
 
     def _default_message(self) -> str:
         return _format_hms(time.monotonic() - self.start)
+
+    def set_message_override(self, override: Optional[str]) -> None:
+        """Temporarily replace the message shown next to the spinner.
+
+        Used by retry loops to surface transient-error context like
+        ``retrying in 4s (attempt 2/3)``. Pass ``None`` to clear and
+        restore the normal ``get_message`` output.
+        """
+        with self._lock:
+            self._message_override = override
+
+    def _current_message(self) -> str:
+        with self._lock:
+            if self._message_override is not None:
+                return self._message_override
+        return self.get_message()
 
     def _render(self, text: str) -> None:
         with self._lock:
@@ -423,7 +581,7 @@ class _StepLine:
         while not self._stop.wait(0.2):
             glyph = self._SPINNER[i % len(self._SPINNER)]
             try:
-                msg = self.get_message()
+                msg = self._current_message()
             except Exception:
                 msg = "?"
             self._render(f"{glyph} {self.label} ... {msg}")
@@ -439,7 +597,7 @@ class _StepLine:
             self._stop.set()
             self._thread.join(timeout=1.0)
             try:
-                msg = self.get_message()
+                msg = self._current_message()
             except Exception:
                 msg = _format_hms(time.monotonic() - self.start)
             glyph = self._OK if exit_code == 0 else self._FAIL
@@ -645,10 +803,12 @@ def process_one_zip(
         # Show a single-line progress indicator while the silent zip
         # extraction runs. On a TTY the spinner refreshes in place; in
         # non-TTY contexts we still bracket the work with a "..." line
-        # so logs are self-explanatory.
-        with _StepLine(f"Extracting {zip_path.name}"):
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(temp_extract)
+        # so logs are self-explanatory. ``_extract_zip_with_retry``
+        # handles transient rclone/OneDrive FUSE I/O errors with
+        # exponential backoff and a local-copy fallback so a brief
+        # rclone blip no longer fails the whole book.
+        with _StepLine(f"Extracting {zip_path.name}") as step:
+            _extract_zip_with_retry(zip_path, temp_extract, log_path, step)
 
         metadata_dir = temp_extract / "metadata"
         metadata_json = metadata_dir / "metadata.json"
