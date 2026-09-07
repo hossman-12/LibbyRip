@@ -35,6 +35,7 @@ environment variable so any child process that imports ``log_helper.py`` can
 append to the same file.
 """
 import argparse
+from difflib import SequenceMatcher
 import json
 import os
 import re
@@ -44,11 +45,14 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import zipfile
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
+from buildChapters import Metadata as ChapterMetadata
 from log_helper import log as _log
 
 
@@ -165,6 +169,40 @@ def read_metadata_title(metadata_json_path: Path) -> str:
     return str(meta.get("title", ""))
 
 
+def read_metadata_object(metadata_json_path: Path) -> Optional[dict]:
+    """Read and return a Libby metadata object, or ``None`` if invalid."""
+    if not metadata_json_path.is_file():
+        return None
+    try:
+        value = json.loads(metadata_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _metadata_creators(metadata: dict) -> dict[str, str]:
+    """Return the author and narrator values used by output validation."""
+    result = {"author": "", "narrator": ""}
+    creators = metadata.get("creator") or []
+    if not isinstance(creators, list):
+        creators = [creators]
+    for entry in creators:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get("role", ""))
+        name = str(entry.get("name", ""))
+        if role == "author" and name and not result["author"]:
+            result["author"] = name
+        elif role == "narrator" and name:
+            result["narrator"] = ", ".join(
+                filter(None, [result["narrator"], name])
+            )
+        elif role == "author and narrator" and name:
+            result["author"] = result["author"] or name
+            result["narrator"] = result["narrator"] or name
+    return result
+
+
 def write_utf8_no_bom(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` as UTF-8 without a byte-order mark."""
     path.write_text(text, encoding="utf-8")
@@ -242,6 +280,206 @@ def find_existing_m4b(basename: str, audio_books_dir: Path) -> Optional[Path]:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _expected_m4b_metadata(metadata: dict) -> dict:
+    """Build normalized validation expectations from Libby metadata."""
+    parsed = ChapterMetadata.from_json(deepcopy(metadata))
+    creators = _metadata_creators(metadata)
+    chapters = []
+    for index, chapter in enumerate(parsed.chapters):
+        end = (
+            parsed.chapters[index + 1].total_offset
+            if index + 1 < len(parsed.chapters)
+            else parsed.total_duration
+        )
+        chapters.append(
+            {
+                "title": chapter.title,
+                "start": chapter.total_offset.total_seconds(),
+                "end": end.total_seconds(),
+            }
+        )
+    return {
+        "title": str(metadata.get("title", "")),
+        "author": creators["author"],
+        "narrator": creators["narrator"],
+        "duration": parsed.total_duration.total_seconds(),
+        "chapters": chapters,
+    }
+
+
+def _probe_m4b(path: Path) -> tuple[Optional[dict], list[str]]:
+    """Return ffprobe JSON and validation errors for basic readability."""
+    try:
+        result = subprocess.run(
+            [
+                ensure_command("ffprobe"),
+                "-v", "error",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                "-show_chapters",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except (OSError, RuntimeError) as exc:
+        return None, [f"ffprobe could not run: {exc}"]
+    if result.returncode != 0:
+        return None, [f"ffprobe exit code {result.returncode}: {result.stderr.strip()}"]
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return None, [f"ffprobe returned invalid JSON: {exc}"]
+    if not isinstance(value, dict):
+        return None, ["ffprobe returned a non-object JSON result"]
+    return value, []
+
+
+def _probe_chapter_seconds(chapter: dict, field: str) -> Optional[float]:
+    """Convert an ffprobe chapter timestamp into seconds."""
+    value = chapter.get(f"{field}_time")
+    if value is not None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    value = chapter.get(field)
+    time_base = chapter.get("time_base", "1/1")
+    try:
+        numerator, denominator = (int(part) for part in str(time_base).split("/", 1))
+        return float(value) * numerator / denominator
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _normalized_chapter_title(value: str) -> str:
+    """Normalize punctuation/encoding differences in chapter titles."""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _chapter_titles_match(actual: str, expected: str) -> bool:
+    """Compare titles while tolerating lossy punctuation/diacritic encoding."""
+    actual_normalized = _normalized_chapter_title(actual)
+    expected_normalized = _normalized_chapter_title(expected)
+    if actual_normalized == expected_normalized:
+        return True
+    return (
+        SequenceMatcher(None, actual_normalized, expected_normalized).ratio()
+        >= 0.85
+    )
+
+
+def validate_m4b(path: Path, metadata: dict) -> tuple[bool, list[str]]:
+    """Validate an M4B against its source Libby metadata.
+
+    Duration and chapter boundaries use a two-second tolerance because AAC
+    encoding and MP4 muxing can introduce small timestamp differences.
+    """
+    errors: list[str] = []
+    if not path.is_file():
+        return False, ["file does not exist"]
+    try:
+        if path.stat().st_size < 1024:
+            errors.append("file is smaller than 1 KiB")
+    except OSError as exc:
+        return False, [f"cannot stat file: {exc}"]
+
+    probe, probe_errors = _probe_m4b(path)
+    errors.extend(probe_errors)
+    if probe is None:
+        return False, errors
+
+    expected = _expected_m4b_metadata(metadata)
+    format_info = probe.get("format") or {}
+    tags = {str(k).lower(): str(v) for k, v in (format_info.get("tags") or {}).items()}
+    streams = probe.get("streams") or []
+    chapters = probe.get("chapters") or []
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    cover_streams = [
+        s for s in streams
+        if s.get("codec_type") == "video"
+        and int((s.get("disposition") or {}).get("attached_pic", 0)) == 1
+    ]
+
+    if not audio_streams:
+        errors.append("no audio stream")
+    elif audio_streams[0].get("codec_name") != "aac":
+        errors.append(f"audio codec is {audio_streams[0].get('codec_name')}, expected aac")
+    if not cover_streams:
+        errors.append("no attached cover artwork")
+
+    try:
+        actual_duration = float(format_info.get("duration", 0))
+    except (TypeError, ValueError):
+        actual_duration = 0.0
+    if actual_duration <= 0:
+        errors.append("missing or non-positive duration")
+    elif abs(actual_duration - expected["duration"]) > 2.0:
+        errors.append(
+            f"duration {actual_duration:.3f}s differs from expected "
+            f"{expected['duration']:.3f}s"
+        )
+
+    if len(chapters) != len(expected["chapters"]):
+        errors.append(
+            f"chapter count {len(chapters)} differs from expected "
+            f"{len(expected['chapters'])}"
+        )
+    for index, (actual, expected_chapter) in enumerate(
+        zip(chapters, expected["chapters"])
+    ):
+        actual_start = _probe_chapter_seconds(actual, "start")
+        actual_end = _probe_chapter_seconds(actual, "end")
+        if actual_start is None or actual_end is None:
+            errors.append(f"chapter {index + 1} has invalid timestamps")
+            continue
+        if abs(actual_start - expected_chapter["start"]) > 2.0:
+            errors.append(f"chapter {index + 1} start timestamp differs")
+        if abs(actual_end - expected_chapter["end"]) > 2.0:
+            errors.append(f"chapter {index + 1} end timestamp differs")
+        actual_title = str((actual.get("tags") or {}).get("title", ""))
+        if not _chapter_titles_match(actual_title, expected_chapter["title"]):
+            errors.append(f"chapter {index + 1} title differs")
+
+    expected_title = expected["title"].strip()
+    if expected_title and tags.get("title", "").strip() != expected_title:
+        errors.append("title metadata differs")
+    if expected_title and tags.get("album", "").strip() != expected_title:
+        errors.append("album metadata differs")
+    if expected["author"]:
+        author = expected["author"].strip().casefold()
+        if author not in {
+            tags.get("artist", "").strip().casefold(),
+            tags.get("album_artist", "").strip().casefold(),
+        }:
+            errors.append("author metadata differs")
+    if expected["narrator"]:
+        narrator = expected["narrator"].strip().casefold()
+        narrator_tags = " ".join(
+            [tags.get("comment", ""), tags.get("composer", "")]
+        ).casefold()
+        if narrator not in narrator_tags:
+            errors.append("narrator metadata differs")
+
+    return not errors, errors
+
+
+def _read_zip_metadata(zip_path: Path) -> Optional[dict]:
+    """Read metadata.json from a zip without extracting its audio files."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            with zf.open("metadata/metadata.json") as fh:
+                value = json.load(fh)
+    except (OSError, KeyError, zipfile.BadZipFile, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +1095,7 @@ def process_one_zip(
 
         # Step 2: build ffmetadata and chapters.txt.
         meta_text = metadata_json.read_text(encoding="utf-8")
+        metadata_object = json.loads(meta_text)
         bc_ffmpeg = _run_with_progress(
             [sys.executable, str(script_dir / "buildChapters.py"), "--ffmpeg"],
             label="buildChapters.py",
@@ -915,21 +1154,18 @@ def process_one_zip(
             total_duration_seconds=_ffmeta_total_seconds(ffmeta_txt),
         )
 
-        if not output_file.is_file():
-            raise RuntimeError(
-                f"Output not created (ffmpeg exit {ffmpeg.returncode})"
-            )
-        file_size = output_file.stat().st_size
-        if file_size < 1024:
-            output_file.unlink(missing_ok=True)
-            raise RuntimeError(
-                f"Output file is too small ({file_size} bytes); ffmpeg exit {ffmpeg.returncode}"
-            )
         if ffmpeg.returncode != 0:
-            _write_log(
-                f"ffmpeg exited {ffmpeg.returncode} but produced valid file of size {file_size}; treating as success",
-                log_path,
+            raise RuntimeError(
+                f"ffmpeg failed with exit code {ffmpeg.returncode}"
             )
+
+        valid, validation_errors = validate_m4b(output_file, metadata_object)
+        if not valid:
+            reason = "; ".join(validation_errors)
+            _write_log(f"Validation failed for {output_file}: {reason}", log_path)
+            raise RuntimeError(f"Output validation failed: {reason}")
+        file_size = output_file.stat().st_size
+        _write_log(f"Validated {output_file}", log_path)
 
         # Step 4: ffprobe the result for diagnostic logging.
         _run_with_progress(
@@ -978,15 +1214,69 @@ def build_queue() -> list[Path]:
         return []
     zips = sorted(BOOKS_DIR.glob("*.zip"))
     queue: list[Path] = []
+    log_path = Path(os.environ["LIBBYRIP_LOG_FILE"])
+    # Walk AudioBooks once. Repeating rglob once per zip is prohibitively
+    # slow on the rclone/FUSE mount, especially as the library grows.
+    existing_by_name = {
+        candidate.name: candidate
+        for candidate in AUDIOBOOKS_DIR.rglob("*.m4b")
+        if candidate.is_file()
+    }
+
+    def indexed_candidate(basename: str) -> Optional[Path]:
+        candidate = existing_by_name.get(f"{basename}.m4b")
+        if candidate is not None:
+            return candidate
+        match = _AUTHOR_TITLE_RE.match(basename)
+        if not match:
+            return None
+        author = clean_name(match.group(1).strip())
+        title = clean_name(match.group(2).strip())
+        candidate = existing_by_name.get(f"{title}.m4b")
+        if candidate is not None and candidate.parent.name == author:
+            return candidate
+        return None
+
     for zip_path in zips:
-        existing = find_existing_m4b(zip_path.stem, AUDIOBOOKS_DIR)
-        if existing is not None:
-            _write_log(
-                f"Skipping {zip_path.name} - already converted at {existing}",
-                Path(os.environ["LIBBYRIP_LOG_FILE"]),
+        metadata = _read_zip_metadata(zip_path)
+        existing = indexed_candidate(zip_path.stem)
+        if metadata is not None:
+            creators = _metadata_creators(metadata)
+            metadata_output = resolve_output_path(
+                SCRIPT_DIR,
+                creators["author"] or "Unknown Author",
+                str(metadata.get("title", "")) or zip_path.stem,
             )
+            if metadata_output.is_file():
+                existing = metadata_output
+        if existing is None:
+            queue.append(zip_path)
             continue
-        queue.append(zip_path)
+
+        if metadata is None:
+            _write_log(
+                f"Requeueing {zip_path.name} - source metadata could not be read",
+                log_path,
+            )
+            queue.append(zip_path)
+            continue
+
+        try:
+            valid, errors = validate_m4b(existing, metadata)
+        except (KeyError, TypeError, ValueError) as exc:
+            valid, errors = False, [f"source metadata is malformed: {exc}"]
+        if valid:
+            _write_log(
+                f"Skipping {zip_path.name} - validated existing file at {existing}",
+                log_path,
+            )
+        else:
+            _write_log(
+                f"Requeueing {zip_path.name} - invalid existing file at {existing}: "
+                f"{'; '.join(errors)}",
+                log_path,
+            )
+            queue.append(zip_path)
     return queue
 
 
